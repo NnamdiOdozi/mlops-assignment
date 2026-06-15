@@ -25,6 +25,8 @@ DEFAULT_EVAL_FILE = ROOT / "evals" / "eval_set.jsonl"
 DEFAULT_OUT_FILE = ROOT / "results" / "eval_baseline.json"
 DB_DIR = ROOT / "data" / "bird"
 AGENT_URL_DEFAULT = "http://localhost:8001/answer"
+MAX_ATTEMPTS = 3
+AGENT_TIMEOUT_SECONDS = 120.0
 
 
 # ---------- Helpers (provided) -----------------------------------------
@@ -56,21 +58,209 @@ def matches(gold_rows: list[tuple] | None, pred_rows: list[tuple] | None) -> boo
 
 # ---------- Implement these (Phase 5) ----------------------------------
 
+def _attempt_sqls(agent_response: dict) -> list[str]:
+    """Extract the initial and revised SQL statements from agent history."""
+    attempts = [
+        item["sql"]
+        for item in agent_response.get("history", [])
+        if isinstance(item, dict)
+        and item.get("node") in {"generate_sql", "revise"}
+        and item.get("sql")
+    ]
+
+    final_sql = agent_response.get("sql", "")
+
+    if final_sql and (not attempts or attempts[-1] != final_sql):
+        attempts.append(final_sql)
+
+    return attempts[:MAX_ATTEMPTS]
+
 def eval_one(question: dict, agent_url: str) -> dict:
-    """Score one question. Return a dict capturing per-iteration correctness."""
-    raise NotImplementedError("Phase 5")
+    """Score one question using execution accuracy for every SQL attempt."""
+    db_id = question["db_id"]
+    gold_sql = question["gold_sql"]
+
+    gold_ok, gold_rows, gold_error = run_sql(db_id, gold_sql)
+
+    started = time.monotonic()
+
+    try:
+        response = httpx.post(
+            agent_url,
+            json={
+                "question": question["question"],
+                "db": db_id,
+            },
+            timeout=AGENT_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+
+        agent_response = response.json()
+
+        if not isinstance(agent_response, dict):
+            raise ValueError(
+                "Agent returned a non-object JSON response"
+            )
+
+        request_error = None
+
+    except Exception as exc:  # noqa: BLE001
+        agent_response = {}
+        request_error = f"{type(exc).__name__}: {exc}"
+
+    latency_seconds = time.monotonic() - started
+
+    iteration_results: list[dict] = []
+
+    for attempt_index, sql in enumerate(
+        _attempt_sqls(agent_response)
+    ):
+        pred_ok, pred_rows, pred_error = run_sql(db_id, sql)
+
+        correct = (
+            gold_ok
+            and pred_ok
+            and matches(gold_rows, pred_rows)
+        )
+
+        iteration_results.append({
+            "iteration": attempt_index,
+            "attempt": attempt_index + 1,
+            "sql": sql,
+            "execution_ok": pred_ok,
+            "execution_error": pred_error,
+            "row_count": (
+                len(pred_rows)
+                if pred_rows is not None
+                else None
+            ),
+            "correct": correct,
+        })
+
+    final_correct = (
+        iteration_results[-1]["correct"]
+        if iteration_results
+        else False
+    )
+
+    final_sql = agent_response.get("sql", "")
+
+    iterations = int(
+        agent_response.get(
+            "iterations",
+            len(iteration_results),
+        )
+        or 0
+    )
+
+    return {
+        "question": question["question"],
+        "db_id": db_id,
+        "gold_sql": gold_sql,
+        "gold_execution_ok": gold_ok,
+        "gold_execution_error": gold_error,
+        "gold_row_count": (
+            len(gold_rows)
+            if gold_rows is not None
+            else None
+        ),
+        "agent_sql": final_sql,
+        "agent_ok": bool(
+            agent_response.get("ok", False)
+        ),
+        "request_error": request_error,
+        "agent_error": agent_response.get("error"),
+        "iterations": iterations,
+        "latency_seconds": latency_seconds,
+        "iteration_results": iteration_results,
+        "correct": final_correct,
+        "execution_match": final_correct,
+    }
 
 
 def summarize(results: list[dict]) -> dict:
-    """Aggregate per-question results.
+    """Calculate final and per-iteration execution accuracy."""
+    total = len(results)
 
-    Per-iteration carry-forward: if the agent terminated at iteration j < k
-    (verify said ok at j, or it hit MAX_ITERATIONS at j < k), treat the
-    question's iteration-k result as identical to its iteration-j result.
-    The agent stopped emitting; whatever it had at termination is what
-    would have been served had we polled at iteration k.
-    """
-    raise NotImplementedError("Phase 5")
+    final_passes = sum(
+        bool(result.get("correct", False))
+        for result in results
+    )
+
+    pass_counts: dict[str, int] = {}
+    pass_rates: dict[str, float] = {}
+
+    for attempt_index in range(MAX_ATTEMPTS):
+        passed = 0
+
+        for result in results:
+            attempts = result.get(
+                "iteration_results",
+                [],
+            )
+
+            if not attempts:
+                continue
+
+            # Carry the last available result forward when
+            # the agent stopped before this attempt.
+            carried_result = attempts[
+                min(attempt_index, len(attempts) - 1)
+            ]
+
+            passed += bool(
+                carried_result.get("correct", False)
+            )
+
+        key = str(attempt_index)
+
+        pass_counts[key] = passed
+        pass_rates[key] = (
+            passed / total
+            if total
+            else 0.0
+        )
+
+    average_iterations = (
+        sum(
+            int(result.get("iterations", 0))
+            for result in results
+        )
+        / total
+        if total
+        else 0.0
+    )
+
+    return {
+        "total_questions": total,
+        "passed": final_passes,
+        "failed": total - final_passes,
+        "execution_accuracy": (
+            final_passes / total
+            if total
+            else 0.0
+        ),
+        "overall_pass_rate": (
+            final_passes / total
+            if total
+            else 0.0
+        ),
+        "per_iteration_pass_rates": pass_rates,
+        "per_iteration_pass_counts": pass_counts,
+        "average_iterations": average_iterations,
+        "agent_request_errors": sum(
+            bool(result.get("request_error"))
+            for result in results
+        ),
+        "agent_reported_errors": sum(
+            bool(result.get("agent_error"))
+            for result in results
+        ),
+        "gold_execution_errors": sum(
+            not result.get("gold_execution_ok", False)
+            for result in results
+        ),
+    }
 
 
 # ---------- Main (provided) --------------------------------------------
