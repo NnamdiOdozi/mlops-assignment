@@ -59,6 +59,30 @@ The 80B thinking model underperformed expectations (2/10). Its `<think>` reasoni
 
 **Conclusion:** A 4x accuracy improvement (10% → 40%) came purely from model scale, with zero prompt changes. This confirms that our prompt and schema enrichment pipeline is sound — the 30B model simply lacks the reasoning capacity to reliably use the context it receives.
 
+### Full evaluation — Qwen3.5-397B-A17B-fast (30 questions)
+
+We ran the complete eval set (30 questions across 11 databases) against the best-performing model from the comparison experiment. Results logged to `results/interactive_tests.jsonl` as run `qwen3.5-397B-full-30`.
+
+**Overall: 16/30 correct (53% execution accuracy)**
+
+| Database | Correct | Total | Accuracy |
+|---|---|---|---|
+| superhero | 3 | 3 | 100% |
+| student_club | 3 | 3 | 100% |
+| codebase_community | 3 | 5 | 60% |
+| financial | 2 | 3 | 67% |
+| formula_1 | 2 | 4 | 50% |
+| california_schools | 1 | 3 | 33% |
+| thrombosis_prediction | 1 | 3 | 33% |
+| toxicology | 0 | 2 | 0% |
+| card_games | 0 | 3 | 0% |
+
+Key observations:
+- **Revision provides no value at this model scale:** Revise triggered on only 2/30 questions, fixed 0. Q29 was correct on first attempt but the verifier flagged it and revision broke it — a net negative.
+- **Perfect on simpler schemas:** superhero and student_club (straightforward JOINs, clear column names) scored 100%.
+- **Zero on domain-heavy databases:** toxicology and card_games require precise domain value mapping (element codes, rarity/format enums) that even the 397B model struggles with.
+- **53% is a strong result** given that Qwen3-30B-A3B scored 10% with identical prompts. The prompt pipeline (checklist, few-shot examples, sample rows, BIRD column descriptions) is validated — it just needs a model with sufficient reasoning capacity.
+
 ## 4. Performance experiments
 
 ## 5. Final result

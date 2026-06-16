@@ -54,6 +54,7 @@ def run_one(question: dict, gold_sql: str):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
+    parser.add_argument("--full", action="store_true", help="Run all questions instead of 10")
     parser.add_argument("--run-name", default="")
     args = parser.parse_args()
 
@@ -67,7 +68,7 @@ def main():
     with open(EVAL_FILE) as f:
         rows = [json.loads(line) for line in f]
 
-    selected = rows[::PICK_EVERY][:N_QUESTIONS]
+    selected = rows if args.full else rows[::PICK_EVERY][:N_QUESTIONS]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     correct_count = 0
