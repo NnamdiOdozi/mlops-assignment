@@ -17,13 +17,14 @@ import asyncio
 import json
 import random
 import time
+from datetime import datetime
 from pathlib import Path
 
 import aiohttp
 
 ROOT = Path(__file__).resolve().parent.parent
 PERF_POOL = ROOT / "load_test" / "perf_pool.jsonl"
-DEFAULT_OUT = ROOT / "results" / "load_test.json"
+DEFAULT_OUT = ROOT / "results" / f"load_test_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
 AGENT_URL_DEFAULT = "http://localhost:8001/answer"
 
 
@@ -32,8 +33,14 @@ async def fire_one(
     url: str,
     question: dict,
     results: list[dict],
+    run_name: str = "",
+    rps: float = 0.0,
 ) -> None:
-    payload = {"question": question["question"], "db": question["db_id"]}
+    payload = {
+        "question": question["question"],
+        "db": question["db_id"],
+        "tags": {"workload": "perf", "run_name": run_name, "rps": str(rps)},
+    }
     t0 = time.monotonic()
     status = "ok"
     err: str | None = None
@@ -74,7 +81,7 @@ async def drive(args: argparse.Namespace) -> None:
         next_fire = start
         while time.monotonic() < deadline:
             q = rnd.choice(questions)
-            tasks.append(asyncio.create_task(fire_one(session, args.agent_url, q, results)))
+            tasks.append(asyncio.create_task(fire_one(session, args.agent_url, q, results, args.run_name, args.rps)))
             next_fire += interval
             sleep_for = next_fire - time.monotonic()
             if sleep_for > 0:
@@ -93,6 +100,7 @@ async def drive(args: argparse.Namespace) -> None:
         return latencies[k]
 
     summary = {
+        "run_name": args.run_name,
         "requested_rps": args.rps,
         "duration_seconds": args.duration,
         "wall_clock_seconds": wall,
@@ -118,6 +126,7 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--rps", type=float, default=8.0, help="target requests/second")
     p.add_argument("--duration", type=int, default=300, help="seconds to drive load")
+    p.add_argument("--run-name", default="", help="identifier for this test run")
     p.add_argument("--agent-url", default=AGENT_URL_DEFAULT)
     p.add_argument("--out", type=Path, default=DEFAULT_OUT)
     args = p.parse_args()

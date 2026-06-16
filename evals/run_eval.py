@@ -16,6 +16,7 @@ import argparse
 import json
 import sqlite3
 import time
+from datetime import datetime
 from pathlib import Path
 
 import httpx
@@ -75,7 +76,7 @@ def _attempt_sqls(agent_response: dict) -> list[str]:
 
     return attempts[:MAX_ATTEMPTS]
 
-def eval_one(question: dict, agent_url: str) -> dict:
+def eval_one(question: dict, agent_url: str, run_name: str = "") -> dict:
     """Score one question using execution accuracy for every SQL attempt."""
     db_id = question["db_id"]
     gold_sql = question["gold_sql"]
@@ -90,6 +91,7 @@ def eval_one(question: dict, agent_url: str) -> dict:
             json={
                 "question": question["question"],
                 "db": db_id,
+                "tags": {"run_name": run_name},
             },
             timeout=AGENT_TIMEOUT_SECONDS,
         )
@@ -153,6 +155,11 @@ def eval_one(question: dict, agent_url: str) -> dict:
         or 0
     )
 
+    # Row previews (capped at 5)
+    gold_preview = [list(r) for r in (gold_rows or [])[:5]] if gold_rows else []
+    pred_ok, pred_rows, _ = run_sql(db_id, final_sql) if final_sql else (False, None, None)
+    pred_preview = [list(r) for r in (pred_rows or [])[:5]] if pred_rows else []
+
     return {
         "question": question["question"],
         "db_id": db_id,
@@ -164,6 +171,9 @@ def eval_one(question: dict, agent_url: str) -> dict:
             if gold_rows is not None
             else None
         ),
+        "gold_rows_preview": gold_preview,
+        "pred_rows_preview": pred_preview,
+        "agent_history": agent_response.get("history", []),
         "agent_sql": final_sql,
         "agent_ok": bool(
             agent_response.get("ok", False)
@@ -260,17 +270,48 @@ def summarize(results: list[dict]) -> dict:
             not result.get("gold_execution_ok", False)
             for result in results
         ),
+        "fixed_by_revision": sum(
+            1 for r in results
+            if len(r.get("iteration_results", [])) > 1
+            and not r["iteration_results"][0].get("correct")
+            and r.get("correct")
+        ),
+        "broken_by_revision": sum(
+            1 for r in results
+            if len(r.get("iteration_results", [])) > 1
+            and r["iteration_results"][0].get("correct")
+            and not r.get("correct")
+        ),
+        "unchanged_correct": sum(
+            1 for r in results
+            if (len(r.get("iteration_results", [])) <= 1 and r.get("correct"))
+            or (len(r.get("iteration_results", [])) > 1
+                and r["iteration_results"][0].get("correct")
+                and r.get("correct"))
+        ),
+        "unchanged_wrong": sum(
+            1 for r in results
+            if (len(r.get("iteration_results", [])) <= 1 and not r.get("correct"))
+            or (len(r.get("iteration_results", [])) > 1
+                and not r["iteration_results"][0].get("correct")
+                and not r.get("correct"))
+        ),
     }
 
 
 # ---------- Main (provided) --------------------------------------------
 
 def main() -> None:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     parser = argparse.ArgumentParser()
     parser.add_argument("--eval-set", type=Path, default=DEFAULT_EVAL_FILE)
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT_FILE)
+    parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--agent-url", default=AGENT_URL_DEFAULT)
+    parser.add_argument("--run-name", default="")
     args = parser.parse_args()
+
+    if args.out is None:
+        args.out = ROOT / "results" / f"eval_{timestamp}.json"
 
     questions = [json.loads(line) for line in args.eval_set.read_text().splitlines() if line.strip()]
     print(f"Loaded {len(questions)} eval questions from {args.eval_set}")
@@ -279,11 +320,13 @@ def main() -> None:
     t0 = time.monotonic()
     for i, q in enumerate(questions, 1):
         print(f"[{i}/{len(questions)}] {q['db_id']}: {q['question'][:60]}...", flush=True)
-        results.append(eval_one(q, args.agent_url))
+        results.append(eval_one(q, args.agent_url, run_name=args.run_name))
     elapsed = time.monotonic() - t0
 
     summary = summarize(results)
     out = {
+        "timestamp": timestamp,
+        "run_name": args.run_name,
         "summary": summary,
         "wall_clock_seconds": elapsed,
         "results": results,

@@ -128,21 +128,31 @@ def verify_node(state: AgentState) -> dict:
     response = llm().invoke([
         ("system", prompts.VERIFY_SYSTEM),
         ("user", prompts.VERIFY_USER.format(
+            schema=state.schema,
             question=state.question,
             sql=state.sql,
             result=state.execution.render(),
         )),
     ])
     text = response.content
+    ok = False
+    issue = "Could not parse verifier response"
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match:
-        parsed = json.loads(match.group())
-        ok = parsed.get("ok", False)
-        issue = parsed.get("issue", "")
-    else:
-        ok = False
-        issue = "Could not parse verifier response"
+        try:
+            parsed = json.loads(match.group())
+            raw_ok = parsed.get("ok", False)
+            raw_issue = parsed.get("issue", "")
+            ok = bool(raw_ok) if isinstance(raw_ok, bool) else False
+            issue = str(raw_issue) if isinstance(raw_issue, str) else ""
+        except (json.JSONDecodeError, ValueError):
+            pass
     return {"verify_ok": ok, "verify_issue": issue}
+
+
+def _format_previous_attempts(history: list[dict[str, Any]]) -> str:
+    sqls = [h["sql"] for h in history if h.get("node") in ("generate_sql", "revise") and h.get("sql")]
+    return "\n\n".join(f"Attempt {i+1}:\n{sql}" for i, sql in enumerate(sqls))
 
 
 def revise_node(state: AgentState) -> dict:
@@ -160,7 +170,7 @@ def revise_node(state: AgentState) -> dict:
         ("user", prompts.REVISE_USER.format(
             schema=state.schema,
             question=state.question,
-            sql=state.sql,
+            previous_attempts=_format_previous_attempts(state.history),
             result=state.execution.render(),
             issue=state.verify_issue,
         )),
