@@ -1,7 +1,20 @@
+# vLLM OpenAI-compatible server configuration for the H100 run.
+# This file is mounted into the official vllm/vllm-openai Docker image and
+# passed as: --config /infra/vllm_config.yaml
+#
+# Keep heavy serving dependencies (CUDA runtime, PyTorch, Transformers, vLLM)
+# inside the Docker image instead of the application uv environment.
+
 model: Qwen/Qwen3-30B-A3B-Instruct-2507
 host: 0.0.0.0
 port: 8000
+
+# Assignment prompts are usually ~1.5k-3k tokens plus schema/output. 8k leaves
+# headroom without paying the KV-cache cost of the model's full context window.
 max-model-len: 8192
-dtype: auto
-gpu-memory-utilization: 0.90
+
+# Conservative H100 starting point; tune after watching Grafana/vLLM metrics.
+gpu-memory-utilization: 0.92
+max-num-seqs: 32
+max-num-batched-tokens: 8192
 enable-prefix-caching: true

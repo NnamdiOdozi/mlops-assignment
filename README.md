@@ -82,7 +82,7 @@ Once connected and forwarded, run the rest on the VM:
 # 1. Clone repo and install dependencies
 git clone <repo-url>
 cd <repo-folder>
-uv sync
+uv sync --locked
 
 # 2. Configure environment (Langfuse keys go here in Phase 4)
 cp .env.example .env
@@ -129,10 +129,20 @@ The model is fixed: `Qwen/Qwen3-30B-A3B-Instruct-2507`. The hardware is fixed: 1
 
 We are not enumerating which parameters to consider on purpose. Knowing which levers to reach for, given a workload profile (1.5-3K-token prompts, short structured outputs, ~2-3 dependent calls per user request) and a latency target, is the apply-the-lectures part of the assignment. Heads-up: you'll need to iterate.   
 
-There's an example launch script at `scripts/start_vllm.sh` to get you started - feel free to modify it or roll your own. The [vLLM docs](https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html) are your reference for the available flags.
+There is an example launch script at `scripts/start_vllm.sh` that runs the official `vllm/vllm-openai` Docker image instead of installing vLLM into the app's `uv` environment. The checked-in serving configuration lives at `infra/vllm_config.yaml`, and the [vLLM docs](https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html) are your reference for the available flags.
+
+On the H100 machine, keep application dependencies separate from serving dependencies:
+
+```bash
+uv sync --locked           # app dependencies only
+docker compose up -d       # Prometheus, Grafana, Langfuse
+bash scripts/start_vllm.sh # official vLLM Docker container on :8000
+```
+
+The vLLM container owns CUDA, PyTorch, Transformers, and vLLM. The repo's Python environment owns the agent/eval/load-test code.
 
 ### What to do:
-1.  Start vLLM with your initial configuration.
+1.  Start vLLM with your initial configuration from `infra/vllm_config.yaml`.
 
 2.  Confirm the model loads, responds, and the output looks reasonable. Try firing 3-5 inputs from `evals/eval_set.jsonl` manually.
 3. Find your config. You'll probably need to revisit this once you have your agent running.

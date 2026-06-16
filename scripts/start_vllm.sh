@@ -1,17 +1,25 @@
 #!/usr/bin/env bash
 #
-# Start vLLM with your chosen configuration.
-# Reference: https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html
+# Start vLLM with the official Docker image and a checked-in config file.
+# The image carries the heavy serving stack (CUDA runtime, PyTorch,
+# Transformers and vLLM), keeping those packages out of the app uv env.
+#
+# Optional overrides:
+#   VLLM_IMAGE=vllm/vllm-openai:v0.22.1
+#   HF_CACHE_DIR=$HOME/.cache/huggingface
 
 set -euo pipefail
 
-MODEL="Qwen/Qwen3-30B-A3B-Instruct-2507"
+VLLM_IMAGE="${VLLM_IMAGE:-vllm/vllm-openai:v0.22.1}"
+HF_CACHE_DIR="${HF_CACHE_DIR:-$HOME/.cache/huggingface}"
+mkdir -p "$HF_CACHE_DIR"
 
-exec uv run --extra serving vllm serve "$MODEL" \
-    --host 0.0.0.0 \
-    --port 8000 \
-    --max-model-len 8192 \
-    --gpu-memory-utilization 0.92 \
-    --max-num-seqs 32 \
-    --max-num-batched-tokens 8192 \
-    --enable-prefix-caching
+exec docker run --rm \
+    --gpus all \
+    --ipc=host \
+    -p 8000:8000 \
+    -v "$PWD/infra:/infra:ro" \
+    -v "$HF_CACHE_DIR:/root/.cache/huggingface" \
+    -e "HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}" \
+    "$VLLM_IMAGE" \
+    --config /infra/vllm_config.yaml

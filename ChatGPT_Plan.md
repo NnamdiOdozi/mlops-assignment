@@ -45,14 +45,15 @@ git clone https://github.com/<your-github-user>/mlops-assignment.git
 cd mlops-assignment
 
 git remote add upstream https://github.com/GlebBerjoskin/mlops-assignment.git
-git checkout -b submission
-git push -u origin submission
+# Work directly on main unless you intentionally create another branch.
+git checkout main
+git push -u origin main
 ```
 
 On the Nebius virtual machine:
 
 ```bash
-git clone -b submission https://github.com/<your-github-user>/mlops-assignment.git
+git clone -b main https://github.com/<your-github-user>/mlops-assignment.git
 ```
 
 Use **Visual Studio Code Remote SSH** to edit the virtual-machine copy. Keep the local clone mainly for review and backup. Push and pull through GitHub rather than copying files between machines.

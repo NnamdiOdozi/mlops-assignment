@@ -1,12 +1,13 @@
 # Self-hosted observability stack for the assignment.
 #
 # Brings up:
-#   - prometheus (port 9090, scrapes vLLM on host:8000)
+#   - prometheus (port 9090, scrapes vLLM metrics)
 #   - grafana    (port 3000, datasource + starter dashboard auto-loaded)
 #   - langfuse   (port 3001) backed by postgres + clickhouse + redis + minio
 #
-# vLLM itself runs on the host (NOT in this compose), so port forwards from
-# your laptop see localhost:8000 -> vLLM, localhost:3000 -> Grafana, etc.
+# vLLM is launched separately with scripts/start_vllm.sh using the official
+# vllm/vllm-openai Docker image plus infra/vllm_config.yaml. Keeping vLLM out
+# of this compose file avoids starting GPU containers during normal dev runs.
 
 x-langfuse-env: &langfuse-env
   DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
