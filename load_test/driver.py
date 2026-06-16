@@ -22,6 +22,10 @@ from pathlib import Path
 
 import aiohttp
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from agent.config import CONFIG, CONFIG_PATH
+
 ROOT = Path(__file__).resolve().parent.parent
 PERF_POOL = ROOT / "load_test" / "perf_pool.jsonl"
 DEFAULT_OUT = ROOT / "results" / f"load_test_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
@@ -117,7 +121,12 @@ async def drive(args: argparse.Namespace) -> None:
     }
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps({"summary": summary, "results": results}, indent=2))
+    args.out.write_text(json.dumps({
+        "summary": summary,
+        "config_path": str(CONFIG_PATH),
+        "config": CONFIG,
+        "results": results,
+    }, indent=2))
     print(json.dumps(summary, indent=2))
     print(f"Wrote {args.out}")
 

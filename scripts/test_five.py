@@ -7,6 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from agent.config import CONFIG, CONFIG_PATH  # noqa: E402
 from evals.run_eval import eval_one  # noqa: E402
 
 EVAL_FILE = Path(__file__).resolve().parent.parent / "evals" / "eval_set.jsonl"
@@ -85,6 +86,8 @@ def main():
     log_entry = {
         "timestamp": timestamp,
         "run_name": args.run_name,
+        "config_path": str(CONFIG_PATH),
+        "config": CONFIG,
         "total": total,
         "correct": correct_count,
         "accuracy": correct_count / total if total else 0,

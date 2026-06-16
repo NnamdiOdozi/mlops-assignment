@@ -8,10 +8,11 @@ the PRAGMA introspection here or the SQL the model emits later.
 from __future__ import annotations
 
 import csv
-import os
 import sqlite3
 from functools import lru_cache
 from pathlib import Path
+
+from agent.config import SCHEMA_CONFIG
 
 ROOT = Path(__file__).resolve().parent.parent
 DB_DIR = ROOT / "data" / "bird"
@@ -61,9 +62,9 @@ def _load_column_descriptions(db_id: str, table_name: str) -> dict[str, str]:
 def render_schema(db_id: str, sample_rows: int | None = None,
                    sample_max_chars: int | None = None,
                    cell_max_chars: int | None = None) -> str:
-    sr = sample_rows if sample_rows is not None else int(os.environ.get("SCHEMA_SAMPLE_ROWS", "3"))
-    smc = sample_max_chars if sample_max_chars is not None else int(os.environ.get("SCHEMA_SAMPLE_MAX_CHARS", "6000"))
-    cmc = cell_max_chars if cell_max_chars is not None else int(os.environ.get("SAMPLE_CELL_MAX_CHARS", "80"))
+    sr = sample_rows if sample_rows is not None else int(SCHEMA_CONFIG["sample_rows"])
+    smc = sample_max_chars if sample_max_chars is not None else int(SCHEMA_CONFIG["sample_max_chars"])
+    cmc = cell_max_chars if cell_max_chars is not None else int(SCHEMA_CONFIG["cell_max_chars"])
     return _render_schema_cached(db_id, sr, smc, cmc)
 
 

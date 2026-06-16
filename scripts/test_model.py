@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import agent.graph as graph_mod
+from agent.config import CONFIG, CONFIG_PATH
 from evals.run_eval import run_sql, matches
 
 EVAL_FILE = Path(__file__).resolve().parent.parent / "evals" / "eval_set.jsonl"
@@ -55,6 +56,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
     parser.add_argument("--full", action="store_true", help="Run all questions instead of 10")
+    parser.add_argument("--count", type=int, default=None, help="Override number of questions to run")
     parser.add_argument("--run-name", default="")
     args = parser.parse_args()
 
@@ -68,7 +70,12 @@ def main():
     with open(EVAL_FILE) as f:
         rows = [json.loads(line) for line in f]
 
-    selected = rows if args.full else rows[::PICK_EVERY][:N_QUESTIONS]
+    if args.count:
+        selected = rows[:args.count]
+    elif args.full:
+        selected = rows
+    else:
+        selected = rows[::PICK_EVERY][:N_QUESTIONS]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     correct_count = 0
@@ -115,6 +122,8 @@ def main():
         "timestamp": timestamp,
         "run_name": run_name,
         "model": args.model,
+        "config_path": str(CONFIG_PATH),
+        "config": CONFIG,
         "total": total,
         "correct": correct_count,
         "accuracy": correct_count / total if total else 0,

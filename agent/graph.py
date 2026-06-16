@@ -26,17 +26,16 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 
 from agent import prompts
+from agent.config import AGENT_CONFIG, EXPERIMENT_CONFIG
 from agent.execution import ExecutionResult, execute_sql
 from agent.schema import render_schema
 
-# Total generate + revise calls before the loop is forced to stop.
-# 3-5 is a reasonable range; tune it as part of Phase 3.
-MAX_ITERATIONS = 3
+MAX_ITERATIONS = int(AGENT_CONFIG["max_iterations"])
+VERIFY_MAX_ROWS = int(AGENT_CONFIG["verify_max_rows"])
+VERIFY_MODE = str(AGENT_CONFIG.get("verify_mode", "llm"))  # "llm" or "deterministic"
 
 VLLM_BASE_URL = os.environ.get("VLLM_BASE_URL", "http://localhost:8000/v1")
-VLLM_MODEL = os.environ.get("VLLM_MODEL", "Qwen/Qwen3-30B-A3B-Instruct-2507")
-# vLLM ignores the key, but a hosted OpenAI-compatible provider needs a real one.
-# Lets you point the agent at e.g. OpenAI while iterating without a running vLLM.
+VLLM_MODEL = os.environ.get("VLLM_MODEL", str(AGENT_CONFIG["model"]))
 LLM_API_KEY = os.environ.get("OPENAI_API_KEY", "not-needed")
 
 
@@ -55,14 +54,23 @@ class AgentState:
     history: list[dict[str, Any]] = field(default_factory=list)
 
 
-def llm() -> ChatOpenAI:
-    """Chat client pointed at VLLM_BASE_URL (your local vLLM by default)."""
+def _make_llm() -> ChatOpenAI:
     return ChatOpenAI(
         model=VLLM_MODEL,
         base_url=VLLM_BASE_URL,
         api_key=LLM_API_KEY,
-        temperature=0.0,
+        temperature=float(AGENT_CONFIG["temperature"]),
+        max_tokens=int(AGENT_CONFIG["max_tokens"]),
     )
+
+_SHARED_LLM: ChatOpenAI | None = _make_llm() if AGENT_CONFIG.get("reuse_client", True) else None
+
+
+def llm() -> ChatOpenAI:
+    """Return LLM client. Reuses a shared instance when reuse_client=true."""
+    if _SHARED_LLM is not None:
+        return _SHARED_LLM
+    return _make_llm()
 
 
 # ---- Nodes ------------------------------------------------------------
@@ -112,26 +120,71 @@ def execute_node(state: AgentState) -> dict:
     return {"execution": execute_sql(state.db_id, state.sql)}
 
 
+def _deterministic_verify(state: AgentState) -> tuple[bool, str]:
+    """Fast checks that don't need an LLM call. Returns (ok, issue)."""
+    ex = state.execution
+    sql_upper = state.sql.upper().strip()
+    q_lower = state.question.lower()
+
+    # 1. SQL execution error
+    if not ex.ok:
+        return False, f"Execution error: {ex.error}"
+
+    # 2. Zero rows when question expects data
+    if ex.row_count == 0:
+        return False, "Empty result when the question clearly expects rows"
+
+    # 3. SELECT * when specific columns were requested
+    if sql_upper.startswith("SELECT *") or sql_upper.startswith("SELECT\n*"):
+        return False, "SELECT * used — select only the columns the question asks about"
+
+    # 4. Missing aggregation when question implies it
+    agg_keywords = {
+        "how many": "COUNT",
+        "number of": "COUNT",
+        "average": "AVG",
+        "total": "SUM",
+        "highest": "ORDER BY ... DESC LIMIT",
+        "lowest": "ORDER BY ... ASC LIMIT",
+        "most": "ORDER BY ... DESC LIMIT",
+        "least": "ORDER BY ... ASC LIMIT",
+    }
+    for phrase, expected in agg_keywords.items():
+        if phrase in q_lower:
+            # Check if the corresponding SQL keyword is present
+            if phrase in ("how many", "number of") and "COUNT" not in sql_upper:
+                return False, f"Question asks '{phrase}' but SQL has no COUNT"
+            if phrase == "average" and "AVG" not in sql_upper:
+                return False, f"Question asks 'average' but SQL has no AVG"
+            if phrase == "total" and "SUM" not in sql_upper:
+                return False, f"Question asks 'total' but SQL has no SUM"
+            break  # only check the first matching phrase
+
+    # All checks passed — result looks plausible
+    return True, ""
+
+
 def verify_node(state: AgentState) -> dict:
-    """Decide whether state.execution plausibly answers state.question.
+    """Verify execution result. Uses deterministic checks or LLM based on config."""
 
-    Follow the generate_sql_node pattern: build messages from the VERIFY_*
-    prompts, call llm(), parse the reply. Ask the model for a small JSON object
-    like {"ok": bool, "issue": str} and parse it defensively - the model may
-    wrap it in prose or fences. state.execution.render() gives you a compact
-    view of the rows or error to feed into the prompt.
+    # Deterministic mode: fast checks only, no LLM call
+    if VERIFY_MODE == "deterministic":
+        ok, issue = _deterministic_verify(state)
+        return {"verify_ok": ok, "verify_issue": issue}
 
-    Return: {"verify_ok": <bool>, "verify_issue": <str>}.
-    What counts as "not plausible" is yours to define - see the Phase 3 targets
-    in the README.
-    """
+    # LLM mode: always run deterministic checks first for obvious failures,
+    # then fall through to LLM for semantic verification
+    det_ok, det_issue = _deterministic_verify(state)
+    if not det_ok:
+        return {"verify_ok": False, "verify_issue": det_issue}
+
     response = llm().invoke([
         ("system", prompts.VERIFY_SYSTEM),
         ("user", prompts.VERIFY_USER.format(
             schema=state.schema,
             question=state.question,
             sql=state.sql,
-            result=state.execution.render(),
+            result=state.execution.render(max_rows=VERIFY_MAX_ROWS),
         )),
     ])
     text = response.content
@@ -171,7 +224,7 @@ def revise_node(state: AgentState) -> dict:
             schema=state.schema,
             question=state.question,
             previous_attempts=_format_previous_attempts(state.history),
-            result=state.execution.render(),
+            result=state.execution.render(max_rows=VERIFY_MAX_ROWS),
             issue=state.verify_issue,
         )),
     ])

@@ -1,17 +1,8 @@
 #!/usr/bin/env bash
 #
-# Start vLLM with your chosen configuration.
-# Reference: https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html
+# Start vLLM using the TOML experiment config.
+# Override config: CONFIG_PATH=configs/fp8_weights.toml bash scripts/start_vllm.sh
 
 set -euo pipefail
 
-MODEL="Qwen/Qwen3-30B-A3B-Instruct-2507"
-
-exec uv run --extra serving vllm serve "$MODEL" \
-    --host 0.0.0.0 \
-    --port 8000 \
-    --max-model-len 8192 \
-    --gpu-memory-utilization 0.92 \
-    --max-num-seqs 32 \
-    --max-num-batched-tokens 8192 \
-    --enable-prefix-caching
+exec uv run --extra serving python scripts/serve_vllm.py
