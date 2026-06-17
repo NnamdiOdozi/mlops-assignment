@@ -1,0 +1,133 @@
+GPU RUN STEPS
+=============
+
+Stage 22: Verify vLLM
+---------------------
+
+# Check container is running
+docker ps
+
+# Check model endpoint
+curl -s http://127.0.0.1:8000/v1/models | python3 -m json.tool
+
+# Check metrics endpoint
+curl -s http://127.0.0.1:8000/metrics | head
+
+# Check GPU memory
+nvidia-smi
+
+At this point, your Prometheus and Grafana panels should begin receiving real vLLM metrics.
+
+
+Stage 23: Start the agent against local vLLM
+---------------------------------------------
+
+mkdir -p logs
+CONFIG_PATH=configs/bf16_baseline.toml nohup uv run uvicorn agent.server:app --host 127.0.0.1 --port 8001 > logs/agent.log 2>&1 & echo $! > logs/agent.pid
+
+# Check both endpoints
+curl -s http://127.0.0.1:8001/health
+curl -s http://127.0.0.1:8000/v1/models | python3 -m json.tool
+
+# Run one manual question
+curl -s -X POST http://127.0.0.1:8001/answer \
+  -H "Content-Type: application/json" \
+  -d '{"question":"List down Ajax superpowers.","db":"superhero"}' | python3 -m json.tool
+
+Capture:
+  screenshots/vllm_manual_query.png   — screenshot of the JSON response in terminal
+  screenshots/grafana_serving.png     — Grafana dashboard showing vLLM metrics
+
+
+Stage 24: Run baseline evaluation (all 30)
+-------------------------------------------
+
+CONFIG_PATH=configs/bf16_baseline.toml uv run python evals/run_eval.py --out results/eval_baseline.json --run-name bf16-baseline
+
+python3 -m json.tool results/eval_baseline.json | head -n 60
+
+Capture the Grafana dashboard while the evaluation is running:
+  screenshots/grafana_eval_run.png
+
+All pass rates reported in the submission should come from this real Qwen 30B endpoint.
+
+
+Stage 25: Run short load-test probes
+--------------------------------------
+
+Start with one-minute tests rather than immediately paying for several five-minute experiments.
+
+CONFIG_PATH=configs/bf16_baseline.toml uv run python load_test/driver.py --rps 2 --duration 60 --out results/load_rps2.json
+CONFIG_PATH=configs/bf16_baseline.toml uv run python load_test/driver.py --rps 5 --duration 60 --out results/load_rps5.json
+CONFIG_PATH=configs/bf16_baseline.toml uv run python load_test/driver.py --rps 8 --duration 60 --out results/load_rps8.json
+CONFIG_PATH=configs/bf16_baseline.toml uv run python load_test/driver.py --rps 10 --duration 60 --out results/load_rps10_short.json
+
+Watch Grafana during each test and identify which metric deteriorates first.
+
+
+Stage 26: Tune one setting at a time
+--------------------------------------
+
+For each experiment: stop vLLM, switch TOML config, restart vLLM, rerun load test.
+
+# Stop vLLM (find container ID first)
+docker ps
+docker stop <container_id>
+
+# Restart with different config (e.g. FP8 weights)
+CONFIG_PATH=configs/fp8_weights.toml nohup uv run python scripts/serve_vllm.py > logs/vllm.log 2>&1 & echo $! > logs/vllm.pid
+
+# Follow logs to confirm startup
+tail -f logs/vllm.log
+
+# Rerun same load test
+CONFIG_PATH=configs/fp8_weights.toml uv run python load_test/driver.py --rps 10 --duration 60 --out results/load_rps10_fp8w.json
+
+Available configs:
+  configs/bf16_baseline.toml  — BF16 baseline
+  configs/fp8_weights.toml    — FP8 weight quantization
+  configs/fp8_kv_cache.toml   — FP8 KV cache
+
+Write each experiment in REPORT.md as:
+  Saw X -> hypothesised Y -> changed Z -> result was W.
+
+
+Stage 27: Final five-minute load test
+---------------------------------------
+
+Once the short ten-request-per-second probe is reasonably stable:
+
+CONFIG_PATH=configs/bf16_baseline.toml uv run python load_test/driver.py --rps 10 --duration 300 --out results/load_final.json
+
+Target: p95 full-agent latency < 5s at 10+ RPS over 5 minutes.
+
+Capture:
+  screenshots/grafana_before.png
+  screenshots/grafana_after.png
+
+
+Stage 28: Re-run quality eval after tuning
+--------------------------------------------
+
+CONFIG_PATH=configs/bf16_baseline.toml uv run python evals/run_eval.py --out results/eval_after_tuning.json --run-name after-tuning
+
+grep -n "pass" results/eval_baseline.json
+grep -n "pass" results/eval_after_tuning.json
+
+This tells you whether your serving changes damaged quality.
+
+
+Stage 29: Stop GPU work
+-------------------------
+
+# Stop agent
+kill "$(cat logs/agent.pid)"
+
+# Stop vLLM container
+docker ps
+docker stop <container_id>
+
+# Stop observability
+docker compose down
+
+Then stop the H100 VM in Nebius console.

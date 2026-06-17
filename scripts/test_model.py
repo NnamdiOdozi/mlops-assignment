@@ -91,7 +91,8 @@ def main():
     )
     if args.reasoning_effort:
         # Reasoning models use max_completion_tokens, not max_tokens
-        llm_kwargs["max_completion_tokens"] = int(graph_mod.AGENT_CONFIG["max_tokens"])
+        # Need headroom for reasoning tokens + actual output
+        llm_kwargs["max_completion_tokens"] = 2000
         llm_kwargs["reasoning_effort"] = args.reasoning_effort
     else:
         llm_kwargs["max_tokens"] = int(graph_mod.AGENT_CONFIG["max_tokens"])

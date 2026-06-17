@@ -49,7 +49,7 @@ curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs
 
 echo "=== Install Claude Code ==="
-npm install -g @anthropic-ai/claude-code
+sudo npm install -g @anthropic-ai/claude-code
 
 echo "=== Download BIRD data ==="
 uv run python scripts/load_data.py
