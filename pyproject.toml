@@ -22,11 +22,6 @@ dependencies = [
 ]
 
 
-[project.optional-dependencies]
-serving = [
-    "vllm==0.23.0",
-]
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

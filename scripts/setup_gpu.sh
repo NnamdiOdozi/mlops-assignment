@@ -21,6 +21,17 @@ else
     cd "$PROJECT_DIR"
 fi
 
+echo "=== Install Docker + NVIDIA Container Toolkit ==="
+sudo apt-get update -y && \
+    sudo apt-get install -y nvidia-container-toolkit && \
+    sudo nvidia-ctk runtime configure --runtime=docker && \
+    sudo apt install -y docker-compose && \
+    sudo adduser "$(id -un)" docker && \
+    sudo systemctl restart docker
+
+echo "=== Pull vLLM Docker image ==="
+docker pull vllm/vllm-openai:v0.22.1
+
 echo "=== Install uv ==="
 curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
@@ -28,8 +39,8 @@ export PATH="$HOME/.local/bin:$PATH"
 echo "=== Install Python 3.12 via uv ==="
 uv python install 3.12
 
-echo "=== Install project dependencies (including vLLM) ==="
-uv sync --extra serving
+echo "=== Install project dependencies ==="
+uv sync
 
 echo "=== Install Node.js (for Claude Code) ==="
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
