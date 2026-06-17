@@ -21,9 +21,11 @@ else
     cd "$PROJECT_DIR"
 fi
 
+echo "=== Install python3-dev headers ==="
+sudo apt-get update -y && sudo apt-get install -y python3-dev
+
 echo "=== Install Docker + NVIDIA Container Toolkit ==="
-sudo apt-get update -y && \
-    sudo apt-get install -y nvidia-container-toolkit && \
+sudo apt-get install -y nvidia-container-toolkit && \
     sudo nvidia-ctk runtime configure --runtime=docker && \
     sudo apt install -y docker-compose && \
     sudo adduser "$(id -un)" docker && \
@@ -69,7 +71,7 @@ echo "     export CONFIG_PATH=configs/bf16_baseline.toml"
 echo "     # or: configs/fp8_weights.toml, configs/fp8_kv_cache.toml"
 echo ""
 echo "  3. Start vLLM (in background):"
-echo "     CONFIG_PATH=\$CONFIG_PATH nohup uv run --extra serving python scripts/serve_vllm.py > logs/vllm.log 2>&1 & echo \$! > logs/vllm.pid"
+echo "     CONFIG_PATH=\$CONFIG_PATH nohup uv run python scripts/serve_vllm.py > logs/vllm.log 2>&1 & echo \$! > logs/vllm.pid"
 echo ""
 echo "  4. Start agent server (in background):"
 echo "     CONFIG_PATH=\$CONFIG_PATH nohup uv run uvicorn agent.server:app --host 127.0.0.1 --port 8001 > logs/agent.log 2>&1 & echo \$! > logs/agent.pid"
