@@ -1,7 +1,8 @@
-"""Run 10-question eval with a specific Nebius model, calling the graph directly.
+"""Run eval with a specific model, calling the graph directly.
 
 Usage:
     uv run python scripts/test_model.py --model "Qwen/Qwen3.5-397B-A17B-fast"
+    uv run python scripts/test_model.py --model gpt-5 --base-url https://api.openai.com/v1 --verify-mode llm --full
 """
 import argparse
 import json
@@ -55,6 +56,9 @@ def run_one(question: dict, gold_sql: str):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
+    parser.add_argument("--base-url", default=None, help="LLM API base URL (default: env/config)")
+    parser.add_argument("--verify-mode", default=None, choices=["llm", "deterministic"])
+    parser.add_argument("--reasoning-effort", default=None, choices=["low", "medium", "high"])
     parser.add_argument("--full", action="store_true", help="Run all questions instead of 10")
     parser.add_argument("--count", type=int, default=None, help="Override number of questions to run")
     parser.add_argument("--run-name", default="")
@@ -62,10 +66,48 @@ def main():
 
     # Override model in graph module
     graph_mod.VLLM_MODEL = args.model
+
+    if args.base_url:
+        graph_mod.VLLM_BASE_URL = args.base_url
+
+    if args.verify_mode:
+        graph_mod.VERIFY_MODE = args.verify_mode
+
+    # Rebuild LLM with overrides
+    from langchain_openai import ChatOpenAI
+    import os
+
+    # Use OPENAI_REAL_API_KEY for non-local base URLs (e.g. OpenAI), else default
+    if args.base_url and "openai.com" in args.base_url:
+        api_key = os.environ.get("OPENAI_REAL_API_KEY", "")
+    else:
+        api_key = os.environ.get("OPENAI_API_KEY", graph_mod.LLM_API_KEY)
+
+    llm_kwargs = dict(
+        model=args.model,
+        base_url=graph_mod.VLLM_BASE_URL,
+        api_key=api_key,
+        temperature=float(graph_mod.AGENT_CONFIG["temperature"]),
+    )
+    if args.reasoning_effort:
+        # Reasoning models use max_completion_tokens, not max_tokens
+        llm_kwargs["max_completion_tokens"] = int(graph_mod.AGENT_CONFIG["max_tokens"])
+        llm_kwargs["reasoning_effort"] = args.reasoning_effort
+    else:
+        llm_kwargs["max_tokens"] = int(graph_mod.AGENT_CONFIG["max_tokens"])
+
+    new_llm = ChatOpenAI(**llm_kwargs)
+    graph_mod._SHARED_LLM = new_llm
     graph_mod.graph = graph_mod.build_graph()
 
     run_name = args.run_name or f"model-test-{args.model.split('/')[-1]}"
     print(f"Testing model: {args.model}")
+    if args.base_url:
+        print(f"Base URL: {args.base_url}")
+    if args.verify_mode:
+        print(f"Verify mode: {args.verify_mode}")
+    if args.reasoning_effort:
+        print(f"Reasoning effort: {args.reasoning_effort}")
 
     with open(EVAL_FILE) as f:
         rows = [json.loads(line) for line in f]
@@ -122,6 +164,9 @@ def main():
         "timestamp": timestamp,
         "run_name": run_name,
         "model": args.model,
+        "base_url": args.base_url or graph_mod.VLLM_BASE_URL,
+        "verify_mode": args.verify_mode or graph_mod.VERIFY_MODE,
+        "reasoning_effort": args.reasoning_effort,
         "config_path": str(CONFIG_PATH),
         "config": CONFIG,
         "total": total,

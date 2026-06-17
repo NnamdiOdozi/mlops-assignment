@@ -18,7 +18,7 @@ N_QUESTIONS = 10
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--agent-url", default="http://localhost:8002/answer")
+    parser.add_argument("--agent-url", default="http://localhost:8001/answer")
     parser.add_argument("--run-name", default="")
     args = parser.parse_args()
 
