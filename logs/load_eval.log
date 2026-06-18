@@ -1,0 +1,17 @@
+{
+  "run_name": "",
+  "requested_rps": 25.0,
+  "duration_seconds": 600,
+  "wall_clock_seconds": 660.0523843070005,
+  "total_requests": 15000,
+  "achieved_rps": 22.725469003113652,
+  "ok": 12563,
+  "timeouts": 66,
+  "http_errors": 1931,
+  "client_errors": 440,
+  "latency_p50": 22.439885179000157,
+  "latency_p95": 106.08861505099958,
+  "latency_p99": 116.0873117709998,
+  "latency_max": 120.73314801099968
+}
+Wrote results/load_rps25_600_fp8w_64_during_eval.json
