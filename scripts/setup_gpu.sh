@@ -49,13 +49,13 @@ sudo apt-get install -y nvidia-container-toolkit && \
     sudo systemctl restart docker
 
 echo "=== Pull vLLM Docker image ==="
-docker pull vllm/vllm-openai:v0.22.1
+sg docker -c "docker pull vllm/vllm-openai:v0.22.1"
 
 echo "=== Download BIRD data ==="
 uv run python scripts/load_data.py
 
 echo "=== Start observability stack ==="
-docker compose up -d
+sg docker -c "docker compose up -d"
 
 echo "=== Create logs directory ==="
 mkdir -p logs
@@ -63,26 +63,27 @@ mkdir -p logs
 echo ""
 echo "=== Done ==="
 echo ""
-echo "Next steps:"
+echo "Next steps (copy-paste each block):"
+echo ""
 echo "  1. Copy your .env file into $PROJECT_DIR/"
 echo ""
-echo "  2. Select experiment config (default: bf16_baseline):"
-echo "     export CONFIG_PATH=configs/bf16_baseline.toml"
-echo "     # or: configs/fp8_weights.toml, configs/fp8_kv_cache.toml"
+echo "  2. Activate docker group (REQUIRED before any docker command):"
+echo "     newgrp docker"
 echo ""
-echo "  3. Start vLLM (in background):"
+echo "  3. Reload shell to pick up uv path:"
+echo "     source \$HOME/.local/bin/env"
+echo ""
+echo "  4. Start vLLM (in background):"
+echo "     export CONFIG_PATH=configs/fp8_weights.toml"
 echo "     CONFIG_PATH=\$CONFIG_PATH nohup uv run python scripts/serve_vllm.py > logs/vllm.log 2>&1 & echo \$! > logs/vllm.pid"
 echo ""
-echo "  4. Start agent server (in background):"
-echo "     CONFIG_PATH=\$CONFIG_PATH nohup uv run uvicorn agent.server:app --host 127.0.0.1 --port 8001 > logs/agent.log 2>&1 & echo \$! > logs/agent.pid"
+echo "  5. Start agent server (4 workers, in background):"
+echo "     CONFIG_PATH=\$CONFIG_PATH PYTHONUNBUFFERED=1 nohup uv run uvicorn agent.server:app --host 127.0.0.1 --port 8001 --workers 4 > logs/agent.log 2>&1 & echo \$! > logs/agent.pid"
 echo ""
-echo "  5. Run eval:"
+echo "  6. Run eval:"
 echo "     CONFIG_PATH=\$CONFIG_PATH uv run python scripts/test_five.py --agent-url http://localhost:8001/answer"
 echo ""
-echo "  6. SSH port forwarding (run from your LOCAL machine):"
+echo "  7. SSH port forwarding (run from your LOCAL machine):"
 echo "     ssh -L 8000:localhost:8000 -L 8001:localhost:8001 -L 3000:localhost:3000 -L 9090:localhost:9090 <gpu-host>"
 echo "     Then open: Grafana http://localhost:3000 (admin/admin)"
 echo "                Prometheus http://localhost:9090"
-echo ""
-echo "Reload shell to pick up uv path:"
-echo "  source \$HOME/.local/bin/env"
