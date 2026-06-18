@@ -1,0 +1,98 @@
+GPU RUN STEPS v2
+================
+
+Prerequisites: vLLM container already running with fp8_weights config (from yesterday).
+Config: configs/fp8_weights.toml
+
+
+Step 1: Start the agent server (4 workers)
+-------------------------------------------
+
+mkdir -p logs
+CONFIG_PATH=configs/fp8_weights.toml PYTHONUNBUFFERED=1 nohup uv run uvicorn agent.server:app --host 127.0.0.1 --port 8001 --workers 4 > logs/agent.log 2>&1 & echo $! > logs/agent.pid
+
+# Verify it's up
+curl -s http://127.0.0.1:8001/health
+
+# Verify vLLM is still running
+curl -s http://127.0.0.1:8000/v1/models | python3 -m json.tool
+
+
+Step 2: Warm-up load test (10 RPS, 60s)
+-----------------------------------------
+
+CONFIG_PATH=configs/fp8_weights.toml uv run python load_test/driver.py --rps 10 --duration 60 --out results/load_rps10_60_fp8w_64_warmup.json
+
+python3 -c "import json; d=json.load(open('results/load_rps10_60_fp8w_64_warmup.json')); s=d['summary']; print(f'OK={s[\"ok\"]} Err={s[\"http_errors\"]} p50={s[\"latency_p50\"]:.2f}s p95={s[\"latency_p95\"]:.2f}s')"
+
+
+Step 3: Load test 20 RPS, 300s
+-------------------------------
+
+CONFIG_PATH=configs/fp8_weights.toml uv run python load_test/driver.py --rps 20 --duration 300 --out results/load_rps20_300_fp8w_64_v2.json
+
+python3 -c "import json; d=json.load(open('results/load_rps20_300_fp8w_64_v2.json')); s=d['summary']; print(f'OK={s[\"ok\"]} Err={s[\"http_errors\"]} p50={s[\"latency_p50\"]:.2f}s p95={s[\"latency_p95\"]:.2f}s')"
+
+Capture: screenshots/grafana_load_20rps_v2.png
+
+
+Step 4: Load test 25 RPS, 300s
+-------------------------------
+
+CONFIG_PATH=configs/fp8_weights.toml uv run python load_test/driver.py --rps 25 --duration 300 --out results/load_rps25_300_fp8w_64.json
+
+python3 -c "import json; d=json.load(open('results/load_rps25_300_fp8w_64.json')); s=d['summary']; print(f'OK={s[\"ok\"]} Err={s[\"http_errors\"]} p50={s[\"latency_p50\"]:.2f}s p95={s[\"latency_p95\"]:.2f}s')"
+
+Capture: screenshots/grafana_load_25rps.png
+
+
+Step 5: Decision — pick RPS for eval
+--------------------------------------
+
+If 25 RPS p95 < 5s  -->  use 25 RPS for eval (Step 6a)
+If 25 RPS p95 >= 5s -->  use 20 RPS for eval (Step 6b)
+
+
+Step 6a: Eval under 25 RPS load
+---------------------------------
+
+# In one terminal, start background load:
+CONFIG_PATH=configs/fp8_weights.toml nohup uv run python load_test/driver.py --rps 25 --duration 600 --out results/load_rps25_600_fp8w_64_during_eval.json > logs/load_eval.log 2>&1 &
+
+# In another terminal, run eval:
+CONFIG_PATH=configs/fp8_weights.toml uv run python evals/run_eval.py --out results/eval_under_load_25rps.json --run-name eval-under-25rps
+
+python3 -m json.tool results/eval_under_load_25rps.json | head -n 60
+
+Capture: screenshots/grafana_eval_under_load.png
+
+
+Step 6b: Eval under 20 RPS load (fallback)
+--------------------------------------------
+
+# In one terminal, start background load:
+CONFIG_PATH=configs/fp8_weights.toml nohup uv run python load_test/driver.py --rps 20 --duration 600 --out results/load_rps20_600_fp8w_64_during_eval.json > logs/load_eval.log 2>&1 &
+
+# In another terminal, run eval:
+CONFIG_PATH=configs/fp8_weights.toml uv run python evals/run_eval.py --out results/eval_under_load_20rps.json --run-name eval-under-20rps
+
+python3 -m json.tool results/eval_under_load_20rps.json | head -n 60
+
+Capture: screenshots/grafana_eval_under_load.png
+
+
+Step 7: Baseline eval (no load) — if not done yesterday
+---------------------------------------------------------
+
+CONFIG_PATH=configs/fp8_weights.toml uv run python evals/run_eval.py --out results/eval_baseline.json --run-name fp8w-baseline
+
+python3 -m json.tool results/eval_baseline.json | head -n 60
+
+
+Step 8: Cleanup
+----------------
+
+kill "$(cat logs/agent.pid)"
+docker ps
+docker stop <container_id>
+docker compose down

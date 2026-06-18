@@ -24,15 +24,12 @@ fi
 echo "=== Install python3-dev headers ==="
 sudo apt-get update -y && sudo apt-get install -y python3-dev
 
-echo "=== Install Docker + NVIDIA Container Toolkit ==="
-sudo apt-get install -y nvidia-container-toolkit && \
-    sudo nvidia-ctk runtime configure --runtime=docker && \
-    sudo apt install -y docker-compose && \
-    sudo adduser "$(id -un)" docker && \
-    sudo systemctl restart docker
+echo "=== Install Node.js (for Claude Code) ==="
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
 
-echo "=== Pull vLLM Docker image ==="
-docker pull vllm/vllm-openai:v0.22.1
+echo "=== Install Claude Code ==="
+sudo npm install -g @anthropic-ai/claude-code
 
 echo "=== Install uv ==="
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -44,12 +41,15 @@ uv python install 3.12
 echo "=== Install project dependencies ==="
 uv sync
 
-echo "=== Install Node.js (for Claude Code) ==="
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt-get install -y nodejs
+echo "=== Install Docker + NVIDIA Container Toolkit ==="
+sudo apt-get install -y nvidia-container-toolkit && \
+    sudo nvidia-ctk runtime configure --runtime=docker && \
+    sudo apt install -y docker-compose && \
+    sudo adduser "$(id -un)" docker && \
+    sudo systemctl restart docker
 
-echo "=== Install Claude Code ==="
-sudo npm install -g @anthropic-ai/claude-code
+echo "=== Pull vLLM Docker image ==="
+docker pull vllm/vllm-openai:v0.22.1
 
 echo "=== Download BIRD data ==="
 uv run python scripts/load_data.py
