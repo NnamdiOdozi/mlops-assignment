@@ -104,6 +104,7 @@ async def drive(args: argparse.Namespace) -> None:
         return latencies[k]
 
     summary = {
+        "timestamp": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
         "run_name": args.run_name,
         "requested_rps": args.rps,
         "duration_seconds": args.duration,
